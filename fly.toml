@@ -1,4 +1,4 @@
-app = "my-blues-stack-cff6"
+app = "my-blues-stack"
 kill_signal = "SIGINT"
 kill_timeout = 5
 processes = [ ]
