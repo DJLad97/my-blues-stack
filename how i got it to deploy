@@ -1,0 +1,2 @@
+Put prisma in dependencies (not dev dependencies)
+And use the updated migrate sh script in this project https://community.fly.io/t/prisma-sqlite-causes-an-out-of-memory-error-on-deploy/11039/2
