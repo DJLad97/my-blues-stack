@@ -4,15 +4,13 @@ import url from "node:url";
 
 import prom from "@isaacs/express-prometheus-middleware";
 import { createRequestHandler } from "@remix-run/express";
-import type { ServerBuild } from "@remix-run/node";
 import { broadcastDevReady, installGlobals } from "@remix-run/node";
 import compression from "compression";
-import type { RequestHandler } from "express";
 import express from "express";
 import morgan from "morgan";
-import sourceMapSupport from "source-map-support";
+// import sourceMapSupport from "source-map-support";
 
-sourceMapSupport.install();
+// sourceMapSupport.install();
 installGlobals();
 run();
 
@@ -20,14 +18,28 @@ async function run() {
   const BUILD_PATH = path.resolve("build/index.js");
   const VERSION_PATH = path.resolve("build/version.txt");
 
-  const initialBuild = await reimportServer();
-  const remixHandler =
-    process.env.NODE_ENV === "development"
-      ? await createDevRequestHandler(initialBuild)
-      : createRequestHandler({
-          build: initialBuild,
-          mode: initialBuild.mode,
-        });
+  const viteDevServer =
+    process.env.NODE_ENV === "production"
+      ? undefined
+      : await import("vite").then((vite) =>
+          vite.createServer({
+            server: { middlewareMode: true },
+          }),
+        );
+
+  //   const initialBuild = await reimportServer();
+  //   const remixHandler =
+  //     process.env.NODE_ENV === "development"
+  //       ? await createDevRequestHandler(initialBuild)
+  //       : createRequestHandler({
+  //           build: initialBuild,
+  //           mode: initialBuild.mode,
+  //         });
+  const remixHandler = createRequestHandler({
+    build: viteDevServer
+      ? () => viteDevServer.ssrLoadModule("virtual:remix/server-build")
+      : await import("./build/server/index.js"),
+  });
 
   const app = express();
   const metricsApp = express();
@@ -87,10 +99,14 @@ async function run() {
   app.disable("x-powered-by");
 
   // Remix fingerprints its assets so we can cache forever.
-  app.use(
-    "/build",
-    express.static("public/build", { immutable: true, maxAge: "1y" }),
-  );
+  if (viteDevServer) {
+    app.use(viteDevServer.middlewares);
+  } else {
+    app.use(
+      "/assets",
+      express.static("build/client/assets", { immutable: true, maxAge: "1y" }),
+    );
+  }
 
   // Everything else (like favicon.ico) is cached for an hour. You may want to be
   // more aggressive with this caching.
@@ -104,9 +120,9 @@ async function run() {
   app.listen(port, () => {
     console.log(`✅ app ready: http://localhost:${port}`);
 
-    if (process.env.NODE_ENV === "development") {
-      broadcastDevReady(initialBuild);
-    }
+    // if (process.env.NODE_ENV === "development") {
+    //   broadcastDevReady(initialBuild);
+    // }
   });
 
   const metricsPort = process.env.METRICS_PORT || 3010;
@@ -115,7 +131,7 @@ async function run() {
     console.log(`✅ metrics ready: http://localhost:${metricsPort}/metrics`);
   });
 
-  async function reimportServer(): Promise<ServerBuild> {
+  async function reimportServer() {
     // cjs: manually remove the server build from the require cache
     Object.keys(require.cache).forEach((key) => {
       if (key.startsWith(BUILD_PATH)) {
@@ -132,9 +148,7 @@ async function run() {
     return import(BUILD_URL + "?t=" + stat.mtimeMs);
   }
 
-  async function createDevRequestHandler(
-    initialBuild: ServerBuild,
-  ): Promise<RequestHandler> {
+  async function createDevRequestHandler(initialBuild) {
     let build = initialBuild;
     async function handleServerUpdate() {
       // 1. re-import the server build
